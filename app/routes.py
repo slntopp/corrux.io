@@ -5,6 +5,8 @@ import pytz
 from app import app, db
 from flask import request, jsonify
 
+from pymongo import UpdateOne
+
 from app.utils import adapter, format_date
 
 @app.route('/excavator_operational', methods=['GET'])
@@ -32,30 +34,46 @@ def get_operational_status():
 
 @app.route('/excavator_operating_hours_since_last_maintenance', methods=['GET'])
 def operating_hours():
-    print(db.stats.find())
-    ts = datetime(1, 1, 1)
-    if last := db.stats.find_one({}, sort=[('ts', -1)]):
-        ts = format_date.timestamp_loads(last['timestamp'])
-        if (pytz.utc.localize(datetime.now()) - ts).seconds // 60 == 0:
-            pass # compute from object
+    compute_from_last = lambda last: format_date.compute_hours_since(last['most_recent_maintenance'])
 
+    if last := db.stats.find_one({}, sort=[('timestamp', -1)]):
+        if (pytz.utc.localize(datetime.now()) - pytz.utc.localize(last['timestamp'])).seconds // 60 == 0:
+            return compute_from_last(last)
+    
     client = adapter.BigCoAPIClient(
         'https://corrux-challenge.azurewebsites.net',
         username=os.environ['BIGCO_USERNAME'],
         password=os.environ['BIGCO_PASSWORD']
     )
+    ts = last['timestamp'] if last else pytz.utc.localize(datetime(1, 1, 1))
+    data = client.excavator_stats(ts, datetime.now())
 
+    requests = list(map(lambda rec: UpdateOne({'timestamp': rec['timestamp']}, {'$set': rec}, upsert=True), data))
+    db.stats.bulk_write(requests, ordered=False)
 
-    # if:             db = [{a:0, b:0},{a:1, b:1},{a:2, b:2}]
-    # update with:  data = [{a:0, b:1},{a:1, b:2},{a:2, b:3}]
-    # so like -
-    #  for i in range(db):
-    #       where db[i].a == data[i].a: 
-    #           db[i].b = data[i].b 
-    db.stats.update_many(
-        {'_id': { "$regex": "." }},
-        client.excavator_stats(ts, datetime.now()),
-        upsert=True
-    )
+    return compute_from_last(data[-1])
+
+@app.route('/excavator_average_fuel_rate_past_24h', methods=['GET'])
+def fuel_rate():
+
+    # обновлять данные из API
+
+    first = db.stats.find_one({
+        "timestamp": {
+            "$gte": pytz.utc.localize(datetime(2019, 3, 1, 0, 0))
+        }
+    })
+    last  = db.stats.find_one({
+        "timestamp": {
+            "$lte": pytz.utc.localize(datetime(2020, 3, 2, 0, 0))
+        }
+    }, sort = [('timestamp', -1)])
+
+    print(first, last)
+
+    fuel_used       = last['cumulative_fuel_used'] - first['cumulative_fuel_used']
+    hours_operated  = last['cumulative_hours_operated'] - first['cumulative_hours_operated']
+
+    print(fuel_used, ' / ', hours_operated, ' => ', fuel_used / hours_operated)
 
     return '', 200

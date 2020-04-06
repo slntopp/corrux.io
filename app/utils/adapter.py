@@ -44,13 +44,19 @@ class BigCoAPIClient:
 
     def excavator_stats(self, stime:datetime, etime:datetime) -> dict:
         stime, etime = format_date.dumps(stime), format_date.dumps(etime)
-        return self.__call__(
+        res = self.__call__(
             'excavator_stats',
             params=[
                 ('start_time',  '2019-03-01+00:00'),
                 ('end_time',    '2019-03-01+01:00')
             ]
         )
+        def serialize(obj):
+            obj['most_recent_maintenance'] = format_date.timestamp_loads(obj['most_recent_maintenance'])
+            obj['timestamp'] = format_date.timestamp_loads(obj['timestamp'])
+            return obj
+
+        return list(map(lambda rec: serialize(rec), res))
     
     def can_stream(self) -> dict:
         return self.__call__('can_stream')
