@@ -6,7 +6,7 @@ from flask_pymongo import PyMongo
 from datetime import datetime
 
 class JSONEncoder(json.JSONEncoder):
-    ''' extend json-encoder class'''
+    ''' extend json-encoder class '''
 
     def default(self, o):
         if isinstance(o, ObjectId):

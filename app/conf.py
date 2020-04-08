@@ -1,5 +1,5 @@
 class Config(object):
-    DEBUG = True
+    DEBUG = False
 
     MONGO_URI = 'mongodb://localhost/corrux'
     CSRF_ENABLED = False
