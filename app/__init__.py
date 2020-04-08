@@ -17,10 +17,10 @@ class JSONEncoder(json.JSONEncoder):
 
 app = Flask(__name__)
 
-app.config.from_object('app.conf.Config')
-mongo = PyMongo(app)
-db = mongo.db.corrux
+app.config.from_object('app.conf.Config') # Loading conf from Config class in conf.py
+mongo = PyMongo(app) # Loadig mongo client using app.conf
+db = mongo.db.corrux # Loading corrux db from Mongo
 
-app.json_encoder = JSONEncoder
+app.json_encoder = JSONEncoder # Using custom encoder
 
-from app import routes
+from app import routes # Loading routes
