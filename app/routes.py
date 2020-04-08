@@ -1,6 +1,6 @@
-import os
+from os import environ
 from datetime import datetime, timedelta
-import pytz
+from pytz import utc
 
 from app import app, db
 from flask import request, jsonify
@@ -16,8 +16,8 @@ def get_operational_status():
     try:
         excavator_status = adapter.parse_dashboard(
             'https://corrux-challenge.azurewebsites.net/login',
-            username=os.environ['BIGCO_USERNAME'],
-            password=os.environ['BIGCO_PASSWORD']
+            username=environ['BIGCO_USERNAME'],
+            password=environ['BIGCO_PASSWORD']
         )[18:].lower()
 
         db.dashboard_data.insert_one({
@@ -36,17 +36,19 @@ def get_operational_status():
 def operating_hours():
     compute_from_last = lambda last: format_date.compute_hours_since(last['most_recent_maintenance'])
 
+    now = utc.localize(datetime.now())
+
     if last := db.stats.find_one({}, sort=[('timestamp', -1)]):
-        if (pytz.utc.localize(datetime.now()) - pytz.utc.localize(last['timestamp'])).seconds // 60 == 0:
+        if (now - utc.localize(last['timestamp'])).seconds // 60 == 0:
             return compute_from_last(last)
     
     client = adapter.BigCoAPIClient(
         'https://corrux-challenge.azurewebsites.net',
-        username=os.environ['BIGCO_USERNAME'],
-        password=os.environ['BIGCO_PASSWORD']
+        username=environ['BIGCO_USERNAME'],
+        password=environ['BIGCO_PASSWORD']
     )
-    ts = last['timestamp'] if last else pytz.utc.localize(datetime(1, 1, 1))
-    data = client.excavator_stats(ts, datetime.now())
+    ts = last['timestamp'] if last else now - timedelta(hours=24)
+    data = client.excavator_stats(ts, now)
 
     requests = list(map(lambda rec: UpdateOne({'timestamp': rec['timestamp']}, {'$set': rec}, upsert=True), data))
     db.stats.bulk_write(requests, ordered=False)
@@ -56,24 +58,59 @@ def operating_hours():
 @app.route('/excavator_average_fuel_rate_past_24h', methods=['GET'])
 def fuel_rate():
 
-    # обновлять данные из API
+    compute_fuel_rate = lambda first, last: str((last['cumulative_fuel_used'] - first['cumulative_fuel_used']) / (last['cumulative_hours_operated'] - first['cumulative_hours_operated']))
 
-    first = db.stats.find_one({
+    now = utc.localize(datetime.now())
+    prev = now - timedelta(hours=24)
+
+    pool = db.stats.find({
         "timestamp": {
-            "$gte": pytz.utc.localize(datetime(2019, 3, 1, 0, 0))
+            "$gte": prev,
+            "$lte": now
         }
     })
-    last  = db.stats.find_one({
-        "timestamp": {
-            "$lte": pytz.utc.localize(datetime(2020, 3, 2, 0, 0))
-        }
-    }, sort = [('timestamp', -1)])
 
-    print(first, last)
+    try:
+        if last := pool[pool.count() - 1]:
+            if (now - utc.localize(last['timestamp'])).seconds // 60 == 0:
+                return compute_fuel_rate(pool[0], last), 200
+    except IndexError:
+        last = None
+    
+    client = adapter.BigCoAPIClient(
+        'https://corrux-challenge.azurewebsites.net',
+        username=environ['BIGCO_USERNAME'],
+        password=environ['BIGCO_PASSWORD']
+    )
+    ts = last['timestamp'] if last else prev
+    data = client.excavator_stats(ts, now)
 
-    fuel_used       = last['cumulative_fuel_used'] - first['cumulative_fuel_used']
-    hours_operated  = last['cumulative_hours_operated'] - first['cumulative_hours_operated']
+    requests = list(map(lambda rec: UpdateOne({'timestamp': rec['timestamp']}, {'$set': rec}, upsert=True), data))
+    db.stats.bulk_write(requests, ordered=False)
+    
+    return compute_fuel_rate(pool[0], data[-1]), 200
 
-    print(fuel_used, ' / ', hours_operated, ' => ', fuel_used / hours_operated)
+@app.route('/excavator_last_10_CAN_messages', methods=['GET'])
+def last_10_can_msg():
+    
+    get_last_objects = lambda lim: list(db.can_msgs.find({}, {"_id": 0}, sort=[('timestamp', -1)]).limit(lim))
 
-    return '', 200
+    now = utc.localize(datetime.now())
+
+    try:
+        if last := db.can_msgs.find_one({}, sort=[('timestamp', -1)]):
+            if (now - utc.localize(last['timestamp'])).seconds // 60 == 0:
+                return jsonify(get_last_objects(10))
+    except IndexError:
+        last = None
+
+    client = adapter.BigCoAPIClient(
+        'https://corrux-challenge.azurewebsites.net',
+        username=environ['BIGCO_USERNAME'],
+        password=environ['BIGCO_PASSWORD']
+    )
+    data = client.can_stream()
+    requests = list(map(lambda rec: UpdateOne({'timestamp': rec['timestamp'], 'id': rec['id']}, {'$set': rec}, upsert=True), data))
+    db.can_msgs.bulk_write(requests, ordered=True)
+
+    return jsonify(get_last_objects(10))
