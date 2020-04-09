@@ -41,7 +41,7 @@ def get_operational_status():
             'e': 'Dashboard returned http code: %s' % e
         }), 523 # With 523 Code(Origin Is Unreachable)
     
-    return last(), 200
+    return last()['status'], 200
 
 @app.route('/excavator_operating_hours_since_last_maintenance', methods=['GET'])
 def operating_hours():

@@ -1,0 +1,27 @@
+version: '3.5'
+services:
+  app:
+    build: .
+    ports:
+    - 8000:8000
+    volumes:
+      - .:/app
+    environment:
+      - ENV=development
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DB=mongodb://mongo/corrux
+      - BIGCO_USERNAME=employee@bigco.com
+      - BIGCO_PASSWORD=Bagger123!
+    links:
+      - mongo
+  mongo:
+    container_name: mongo
+    image: mongo
+    volumes:
+      - ./data:/data/db
+    ports:
+      - "27017:27017"
+networks:
+  default:
+    name: corrux

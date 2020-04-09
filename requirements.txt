@@ -1,6 +1,5 @@
 Flask
 requests
-# pymongo
 flask_pymongo
 gunicorn
 pytz
