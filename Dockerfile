@@ -3,4 +3,4 @@ ADD . /app
 WORKDIR /app
 RUN pip install -r requirements.txt
 
-ENTRYPOINT ["python","wsgi.py"]
+ENTRYPOINT ["gunicorn","wsgi:app"]
